@@ -9,7 +9,6 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
-
 function escapeXml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -18,10 +17,41 @@ function escapeXml(str) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
 }
-
+function wrapText(text, maxChars) {
+  const words = text.split(' ');
+  const lines = [];
+  let current = '';
+  for (const word of words) {
+    if ((current + ' ' + word).trim().length > maxChars && current) {
+      lines.push(current.trim());
+      current = word;
+    } else {
+      current = (current + ' ' + word).trim();
+    }
+  }
+  if (current) lines.push(current.trim());
+  return lines;
+}
 function buildTextSvg(text, position) {
-  const safe = escapeXml(text.toUpperCase());
-  const y = position === 'top' ? 110 : 1000;
+  const upper = text.toUpperCase();
+  const maxWidth = 1000;
+  const maxChars = 20;
+  const lines = wrapText(upper, maxChars);
+  const longest = lines.reduce((a, b) => a.length > b.length ? a : b, '');
+  let fontSize = Math.floor(maxWidth / (longest.length * 0.6));
+  if (fontSize > 90) fontSize = 90;
+  if (fontSize < 32) fontSize = 32;
+  const lineHeight = fontSize * 1.1;
+  const totalHeight = lines.length * lineHeight;
+  let startY;
+  if (position === 'top') {
+    startY = 50 + fontSize;
+  } else {
+    startY = 1040 - totalHeight + fontSize;
+  }
+  const tspans = lines.map((line, i) =>
+    `<tspan x="540" y="${Math.round(startY + i * lineHeight)}">${escapeXml(line)}</tspan>`
+  ).join('');
   return Buffer.from(`
     <svg width="1080" height="1080" xmlns="http://www.w3.org/2000/svg">
       <style>
@@ -32,18 +62,16 @@ function buildTextSvg(text, position) {
           paint-order: stroke;
           font-family: Arial, sans-serif;
           font-weight: 900;
-          font-size: 80px;
+          font-size: ${fontSize}px;
         }
       </style>
-      <text x="540" y="${y}" text-anchor="middle" class="meme">${safe}</text>
+      <text text-anchor="middle" class="meme">${tspans}</text>
     </svg>
   `);
 }
-
 app.get('/', (req, res) => {
   res.json({ status: 'The Spark Image Merger is running' });
 });
-
 app.post('/merge', async (req, res) => {
   const { image_url, logo_url, brand_name, meme_text_top, meme_text_bottom } = req.body;
   if (!image_url || !logo_url) {
@@ -68,7 +96,6 @@ app.post('/merge', async (req, res) => {
     const logoMeta = await sharp(resizedLogo).metadata();
     const left = 1080 - logoMeta.width - padding;
     const top = 1080 - logoMeta.height - padding;
-
     const composites = [{ input: resizedLogo, left, top }];
     if (meme_text_top && meme_text_top.trim()) {
       composites.push({ input: buildTextSvg(meme_text_top, 'top'), left: 0, top: 0 });
@@ -76,7 +103,6 @@ app.post('/merge', async (req, res) => {
     if (meme_text_bottom && meme_text_bottom.trim()) {
       composites.push({ input: buildTextSvg(meme_text_bottom, 'bottom'), left: 0, top: 0 });
     }
-
     const mergedBuffer = await sharp(squareBase)
       .composite(composites)
       .jpeg({ quality: 90 })
